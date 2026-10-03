@@ -97,7 +97,7 @@
                 (21 . "F10")
                 (23 . "F11")
                 (24 . "F12")
-                (29 . "ContextMenu"))))))
+                (29 . "ContextMenu")))))
 
 (defun letter-final-sym (final)
   (cdr (assoc final
@@ -109,7 +109,7 @@
                 (#\H . "Home")
                 (#\P . "F1")
                 (#\Q . "F2")
-                (#\S . "F4"))))))
+                (#\S . "F4")))))
 
 (defun modifier-args (encoded)
   (unless (and (integerp encoded) (plusp encoded))
