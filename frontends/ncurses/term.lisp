@@ -431,6 +431,7 @@
 
 (defvar *tty-name* nil)
 (defvar *term-io* nil)
+(defvar *terminal-output-stream* nil)
 
 (defun resize-term ()
   (when *term-io*
@@ -449,7 +450,9 @@
   (cl-setlocale:set-all-to-native)
   (if *tty-name*
       (term-init-tty *tty-name*)
-      (charms/ll:initscr))
+      (progn
+        (setf *terminal-output-stream* *terminal-io*)
+        (charms/ll:initscr)))
   (when (zerop (charms/ll:has-colors))
     (charms/ll:endwin)
     (write-line "Please execute TERM=xterm-256color and try again.")
@@ -483,7 +486,7 @@ path. TERM-SET-TTY uses a separate C FILE* and needs independent lifecycle
 work before it can safely share this writer."
   #-win32
   (and (null *tty-name*)
-       (streamp *terminal-io*))
+       (streamp *terminal-output-stream*))
   #+win32
   nil)
 
@@ -494,8 +497,8 @@ Return true when STRING was written. Custom TERM-SET-TTY sessions and
 Windows/PDCurses are intentionally unsupported for the first KKP
 implementation."
   (when (raw-terminal-output-available-p)
-    (write-string string *terminal-io*)
-    (finish-output *terminal-io*)
+    (write-string string *terminal-output-stream*)
+    (finish-output *terminal-output-stream*)
     t))
 
 (defun term-finalize ()
@@ -503,7 +506,8 @@ implementation."
     (fclose *term-io*)
     (setf *term-io* nil))
   (charms/ll:endwin)
-  (charms/ll:delscreen charms/ll:*stdscr*))
+  (charms/ll:delscreen charms/ll:*stdscr*)
+  (setf *terminal-output-stream* nil))
 
 (defun update-cursor-shape (cursor-type)
   (check-type cursor-type lem:cursor-type)
