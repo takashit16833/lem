@@ -9,13 +9,25 @@
 ;;  (we don't use stdscr for input because it calls wrefresh implicitly
 ;;   and causes the display confliction by two threads)
 (defvar *padwin* nil)
+(defvar *pending-codes* nil)
 
-(defun getch ()
+(defun ensure-padwin ()
   (unless *padwin*
     (setf *padwin* (charms/ll:newpad 1 1))
     (charms/ll:keypad *padwin* 1)
     (charms/ll:wtimeout *padwin* -1))
-  (charms/ll:wgetch *padwin*))
+  *padwin*)
+
+(defun getch ()
+  (if *pending-codes*
+      (pop *pending-codes*)
+      (progn
+        (ensure-padwin)
+        (charms/ll:wgetch *padwin*))))
+
+(defun prepend-pending-codes (codes)
+  (setf *pending-codes*
+        (append codes *pending-codes*)))
 
 (defmacro with-getch-input-timeout ((time) &body body)
   `(progn
@@ -45,6 +57,87 @@
                            (code-char code)))))))
          (key (char-to-key char)))
     key))
+
+(defun csi-final-byte-p (code)
+  (and (integerp code)
+       (<= #x40 code #x7e)))
+
+(defun byte-code-p (code)
+  (and (integerp code)
+       (<= 0 code #xff)))
+
+(defun collect-csi-sequence (first-code)
+  "Collect one CSI sequence after ESC [.
+
+FIRST-CODE is the first code after the left bracket. Return three values:
+the sequence string (without ESC [), a status keyword and an optional
+interrupting ncurses code."
+  (let ((codes (list first-code))
+        (count 1))
+    (loop
+      (when (csi-final-byte-p (car (last codes)))
+        (return (values (coerce (mapcar #'code-char codes) 'string)
+                        :complete
+                        nil)))
+      (when (> count 128)
+        (loop
+          (let ((code (getch)))
+            (cond
+              ((= code -1)
+               (return-from collect-csi-sequence
+                 (values nil :discard nil)))
+              ((not (byte-code-p code))
+               (return-from collect-csi-sequence
+                 (values nil :discard code)))
+              ((csi-final-byte-p code)
+               (return-from collect-csi-sequence
+                 (values nil :discard nil)))))))
+      (let ((code (getch)))
+        (cond
+          ((= code -1)
+           (return (values codes :incomplete nil)))
+          ((not (byte-code-p code))
+           (return (values codes :interrupted code)))
+          (t
+           (setf codes (nconc codes (list code)))
+           (incf count)))))))
+
+(defun replay-incomplete-csi (codes &optional interrupt-code)
+  (let ((replay (cons (char-code #\[)
+                      (if (stringp codes)
+                          (map 'list #'char-code codes)
+                          (copy-list codes)))))
+    (when interrupt-code
+      (setf replay (nconc replay (list interrupt-code))))
+    (prepend-pending-codes replay)))
+
+(defun kitty-abort-key-p (key)
+  (and (key-p key)
+       (key-ctrl key)
+       (not (key-meta key))
+       (not (key-super key))
+       (not (key-hyper key))
+       (not (key-shift key))
+       (string= (key-sym key) "]")))
+
+(defun parse-csi-event (first-code)
+  (multiple-value-bind (sequence status interrupt-code)
+      (collect-csi-sequence first-code)
+    (case status
+      (:complete
+       (lem-ncurses/kitty-keyboard:parse-csi-sequence sequence))
+      (:incomplete
+       (replay-incomplete-csi sequence)
+       (values (get-key-from-name "escape") :key))
+      (:interrupted
+       (replay-incomplete-csi sequence interrupt-code)
+       (values (get-key-from-name "escape") :key))
+      (:discard
+       (when interrupt-code
+         (prepend-pending-codes (list interrupt-code)))
+       (values nil :unsupported))
+      (otherwise
+       (values nil :unsupported)))))
 
 (defun csi\[1 ()
   (or (case (getch)
@@ -126,15 +219,29 @@
                           (get-key-from-name "escape"))
                          ((= code #.(char-code #\[))
                           (with-getch-input-timeout (100)
-                            (case (getch)
-                              (#.(char-code #\<)
+                            (let ((first-code (getch)))
+                              (cond
+                                ((= first-code -1)
+                                 (get-key-from-name "escape"))
+                                ((= first-code #.(char-code #\<))
                                  ;;sgr(1006)
                                  (uiop:symbol-call :lem-mouse-sgr1006
                                                    :parse-mouse-event
                                                    #'getch))
-                              (#.(char-code #\1)
-                                 (csi\[1))
-                              (t (get-key-from-name "escape")))))
+                                ((byte-code-p first-code)
+                                 (multiple-value-bind (event status)
+                                     (parse-csi-event first-code)
+                                   (cond
+                                     ((eq status :key)
+                                      (if (kitty-abort-key-p event)
+                                          :abort
+                                          event))
+                                     (t
+                                      (go :start)))))
+                                (t
+                                 (prepend-pending-codes
+                                  (list (char-code #\[) first-code))
+                                 (get-key-from-name "escape"))))))
                          (t
                           (let ((key (get-key code)))
                             (make-key :meta t
