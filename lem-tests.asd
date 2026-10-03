@@ -1,5 +1,6 @@
 (defsystem "lem-tests"
   :depends-on ("lem/core"
+               "lem-ncurses"
                "lem-fake-interface"
                "lem-lisp-syntax"
                "lem-lisp-mode"
@@ -68,6 +69,8 @@
                (:file "self-insert-command")
                (:file "interp")
                (:file "input")
+               (:module "ncurses"
+                :components ((:file "kitty-keyboard")))
                (:file "file")
                (:file "scala-mode")
                (:file "wat-mode")
