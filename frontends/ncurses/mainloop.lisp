@@ -30,17 +30,21 @@
         (input-thread (bt2:current-thread)))
     (unwind-protect
          (when (lem-ncurses/term:term-init)
-           (let ((*standard-output* (make-broadcast-stream))
-                 (*error-output* (make-broadcast-stream))
-                 (*terminal-io* (make-broadcast-stream)))
-             (let ((editor-thread
-                     (funcall function
-                              nil
-                              (lambda (report)
-                                (bt2:interrupt-thread
-                                 input-thread
-                                 (lambda () (error 'exit :value report)))))))
-               (setf result (input-loop editor-thread)))))
+           (unwind-protect
+                (progn
+                  (lem-ncurses/kitty-keyboard:enable)
+                  (let ((*standard-output* (make-broadcast-stream))
+                        (*error-output* (make-broadcast-stream))
+                        (*terminal-io* (make-broadcast-stream)))
+                    (let ((editor-thread
+                            (funcall function
+                                     nil
+                                     (lambda (report)
+                                       (bt2:interrupt-thread
+                                        input-thread
+                                        (lambda () (error 'exit :value report)))))))
+                      (setf result (input-loop editor-thread)))))
+             (lem-ncurses/kitty-keyboard:disable)))
       (lem-ncurses/term:term-finalize))
     (when (and (typep result 'exit)
                (exit-editor-value result))
