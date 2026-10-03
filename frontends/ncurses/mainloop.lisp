@@ -31,17 +31,22 @@
     (unwind-protect
          (when (lem-ncurses/term:term-init)
            (unwind-protect
-                (let ((*standard-output* (make-broadcast-stream))
-                      (*error-output* (make-broadcast-stream))
-                      (*terminal-io* (make-broadcast-stream)))
-                  (let ((editor-thread
-                          (funcall function
-                                   nil
-                                   (lambda (report)
-                                     (bt2:interrupt-thread
-                                      input-thread
-                                      (lambda () (error 'exit :value report)))))))
-                    (setf result (input-loop editor-thread))))
+                (progn
+                  ;; Apply the frontend default before the editor thread starts.
+                  ;; User init can override it through SYNC-ENABLED-STATE.
+                  (lem-ncurses/kitty-keyboard:enable)
+                  (let ((*standard-output* (make-broadcast-stream))
+                        (*error-output* (make-broadcast-stream))
+                        (*terminal-io* (make-broadcast-stream)))
+                    (let ((editor-thread
+                            (funcall function
+                                     nil
+                                     (lambda (report)
+                                       (bt2:interrupt-thread
+                                        input-thread
+                                        (lambda ()
+                                          (error 'exit :value report)))))))
+                      (setf result (input-loop editor-thread)))))
              (lem-ncurses/kitty-keyboard:disable)))
       (lem-ncurses/term:term-finalize))
     (when (and (typep result 'exit)

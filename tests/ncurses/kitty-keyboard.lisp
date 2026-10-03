@@ -119,7 +119,9 @@
       (ng key)
       (ok (eq status :response)))))
 
-(deftest unknown-pua-is-not-inserted
+(deftest unsupported-functional-key-is-not-inserted
+  ;; MUTE_VOLUME is a valid KKP functional key but Lem has no matching
+  ;; named key yet. It must be consumed safely instead of becoming text.
   (multiple-value-bind (key status) (parse-key "57440u")
     (ng key)
     (ok (eq status :unsupported))))
@@ -134,3 +136,115 @@
   (multiple-value-bind (key status) (parse-key "115;9:2u")
     (ok (eq status :key))
     (ok (key-matches-p key :super t :sym "s"))))
+
+
+(deftest core-control-key-compatibility
+  ;; The first KKP implementation intentionally preserves Lem core's
+  ;; historical C-i/C-m/C-[ conversions.
+  (multiple-value-bind (key status) (parse-key "105;5u")
+    (ok (eq status :key))
+    (ok (key-matches-p key :sym "Tab")))
+  (multiple-value-bind (key status) (parse-key "109;5u")
+    (ok (eq status :key))
+    (ok (key-matches-p key :sym "Return")))
+  (multiple-value-bind (key status) (parse-key "91;5u")
+    (ok (eq status :key))
+    (ok (key-matches-p key :sym "Escape"))))
+
+(deftest parse-control-space
+  (multiple-value-bind (key status) (parse-key "32;5u")
+    (ok (eq status :key))
+    (ok (key-matches-p key :ctrl t :sym "Space"))))
+
+(defun make-code-reader (codes)
+  (let ((codes (copy-list codes)))
+    (lambda ()
+      (if codes
+          (pop codes)
+          -1))))
+
+(deftest collect-complete-csi-sequence
+  (let ((reader (make-code-reader
+                 (map 'list #'char-code "15;9u"))))
+    (multiple-value-bind (sequence status interrupt)
+        (lem-ncurses/input::collect-csi-sequence
+         (char-code #\1)
+         reader)
+      (ok (eq status :complete))
+      (ok (string= sequence "115;9u"))
+      (ng interrupt))))
+
+(deftest collect-partial-csi-sequence
+  (let ((reader (make-code-reader
+                 (map 'list #'char-code "15;"))))
+    (multiple-value-bind (sequence status interrupt)
+        (lem-ncurses/input::collect-csi-sequence
+         (char-code #\1)
+         reader)
+      (declare (ignore sequence))
+      (ok (eq status :incomplete))
+      (ng interrupt))))
+
+(deftest collect-csi-interrupted-by-ncurses-event
+  (let ((reader (make-code-reader
+                 (list (char-code #\1)
+                       (char-code #\5)
+                       410))))
+    (multiple-value-bind (sequence status interrupt)
+        (lem-ncurses/input::collect-csi-sequence
+         (char-code #\1)
+         reader)
+      (declare (ignore sequence))
+      (ok (eq status :interrupted))
+      (ok (= interrupt 410)))))
+
+(deftest nested-input-timeout-restores-state
+  (let ((lem-ncurses/input::*padwin* nil)
+        (lem-ncurses/input::*getch-timeout* -1))
+    (lem-ncurses/input::with-getch-input-timeout (100)
+      (ok (= lem-ncurses/input::*getch-timeout* 100))
+      (lem-ncurses/input::with-getch-input-timeout (20)
+        (ok (= lem-ncurses/input::*getch-timeout* 20)))
+      (ok (= lem-ncurses/input::*getch-timeout* 100)))
+    (ok (= lem-ncurses/input::*getch-timeout* -1))))
+
+
+(deftest kitty-keyboard-push-pop-is-balanced
+  (let ((stream (make-string-output-stream))
+        (lem-ncurses/term::*tty-name* nil)
+        (lem-ncurses/kitty-keyboard::*keyboard-mode-pushed-p* nil))
+    (let ((lem-ncurses/term::*terminal-output-stream* stream))
+      (lem/common/var:with-global-variable-value
+          (lem-ncurses/config:enable-kitty-keyboard-protocol t)
+        (lem-ncurses/kitty-keyboard:enable)
+        ;; A second enable must not push a second stack entry.
+        (lem-ncurses/kitty-keyboard:enable)
+        (lem-ncurses/kitty-keyboard:disable)
+        ;; A second disable must not pop the caller's stack entry.
+        (lem-ncurses/kitty-keyboard:disable))
+      (ok
+       (string=
+        (get-output-stream-string stream)
+        (format nil "~C[>1u~C[<u" #\Esc #\Esc))))))
+
+(deftest user-setting-can-disable-early-default
+  (let ((stream (make-string-output-stream))
+        (lem-ncurses/term::*tty-name* nil)
+        (lem-ncurses/kitty-keyboard::*keyboard-mode-pushed-p* nil)
+        (variable 'lem-ncurses/config:enable-kitty-keyboard-protocol))
+    (let ((lem-ncurses/term::*terminal-output-stream* stream)
+          (saved (variable-value
+                  'lem-ncurses/config:enable-kitty-keyboard-protocol
+                  :global)))
+      (unwind-protect
+           (progn
+             (setf (variable-value variable :global) t)
+             (lem-ncurses/kitty-keyboard:enable)
+             (setf (variable-value variable :global) nil)
+             (lem-ncurses/kitty-keyboard::sync-enabled-state)
+             (ng (lem-ncurses/kitty-keyboard:enabled-p))
+             (ok
+              (string=
+               (get-output-stream-string stream)
+               (format nil "~C[>1u~C[<u" #\Esc #\Esc))))
+        (setf (variable-value variable :global) saved)))))
