@@ -10,12 +10,13 @@
 ;;   and causes the display confliction by two threads)
 (defvar *padwin* nil)
 (defvar *pending-codes* nil)
+(defvar *getch-timeout* -1)
 
 (defun ensure-padwin ()
   (unless *padwin*
     (setf *padwin* (charms/ll:newpad 1 1))
     (charms/ll:keypad *padwin* 1)
-    (charms/ll:wtimeout *padwin* -1))
+    (charms/ll:wtimeout *padwin* *getch-timeout*))
   *padwin*)
 
 (defun getch ()
@@ -29,11 +30,17 @@
   (setf *pending-codes*
         (append codes *pending-codes*)))
 
+(defun set-getch-input-timeout (time)
+  (setf *getch-timeout* time)
+  (when *padwin*
+    (charms/ll:wtimeout *padwin* time)))
+
 (defmacro with-getch-input-timeout ((time) &body body)
-  `(progn
-     (charms/ll:wtimeout *padwin* ,time)
-     (unwind-protect (progn ,@body)
-       (charms/ll:wtimeout *padwin* -1))))
+  `(let ((old-timeout *getch-timeout*))
+     (set-getch-input-timeout ,time)
+     (unwind-protect
+          (progn ,@body)
+       (set-getch-input-timeout old-timeout))))
 
 (defun utf8-bytes (c)
   (cond
@@ -66,7 +73,7 @@
   (and (integerp code)
        (<= 0 code #xff)))
 
-(defun collect-csi-sequence (first-code)
+(defun collect-csi-sequence (first-code &optional (read-code #'getch))
   "Collect one CSI sequence after ESC [.
 
 FIRST-CODE is the first code after the left bracket. Return three values:
@@ -81,7 +88,7 @@ interrupting ncurses code."
                         nil)))
       (when (> count 128)
         (loop
-          (let ((code (getch)))
+          (let ((code (funcall read-code)))
             (cond
               ((= code -1)
                (return-from collect-csi-sequence
@@ -92,7 +99,7 @@ interrupting ncurses code."
               ((csi-final-byte-p code)
                (return-from collect-csi-sequence
                  (values nil :discard nil)))))))
-      (let ((code (getch)))
+      (let ((code (funcall read-code)))
         (cond
           ((= code -1)
            (return (values codes :incomplete nil)))
@@ -125,19 +132,21 @@ interrupting ncurses code."
       (collect-csi-sequence first-code)
     (case status
       (:complete
-       (lem-ncurses/kitty-keyboard:parse-csi-sequence sequence))
+       (multiple-value-bind (event parse-status)
+           (lem-ncurses/kitty-keyboard:parse-csi-sequence sequence)
+         (values event parse-status sequence)))
       (:incomplete
        (replay-incomplete-csi sequence)
-       (values (get-key-from-name "escape") :key))
+       (values (get-key-from-name "escape") :key nil))
       (:interrupted
        (replay-incomplete-csi sequence interrupt-code)
-       (values (get-key-from-name "escape") :key))
+       (values (get-key-from-name "escape") :key nil))
       (:discard
        (when interrupt-code
          (prepend-pending-codes (list interrupt-code)))
-       (values nil :unsupported))
+       (values nil :unsupported nil))
       (otherwise
-       (values nil :unsupported)))))
+       (values nil :unsupported nil)))))
 
 (let ((resize-code (get-code "[resize]"))
       (abort-code (get-code "C-]"))
@@ -145,7 +154,7 @@ interrupting ncurses code."
   (defun get-event ()
     (tagbody :start
       (return-from get-event
-        (let ((code (getch)))
+        (let ((code (funcall read-code)))
           (cond ((= code -1) (go :start))
                 ((= code resize-code) :resize)
                 ((= code abort-code) :abort)
@@ -167,14 +176,23 @@ interrupting ncurses code."
                                                    :parse-mouse-event
                                                    #'getch))
                                 ((byte-code-p first-code)
-                                 (multiple-value-bind (event status)
+                                 (multiple-value-bind (event status sequence)
                                      (parse-csi-event first-code)
-                                   (cond
-                                     ((eq status :key)
+                                   (case status
+                                     (:key
                                       (if (kitty-abort-key-p event)
                                           :abort
                                           event))
-                                     (t
+                                     (:response
+                                      (go :start))
+                                     ((:unsupported :malformed)
+                                      (if (lem-ncurses/kitty-keyboard:enabled-p)
+                                          (go :start)
+                                          (progn
+                                            (when sequence
+                                              (replay-incomplete-csi sequence))
+                                            (get-key-from-name "escape"))))
+                                     (otherwise
                                       (go :start)))))
                                 (t
                                  (prepend-pending-codes
