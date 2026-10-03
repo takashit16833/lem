@@ -154,7 +154,7 @@ interrupting ncurses code."
   (defun get-event ()
     (tagbody :start
       (return-from get-event
-        (let ((code (funcall read-code)))
+        (let ((code (getch)))
           (cond ((= code -1) (go :start))
                 ((= code resize-code) :resize)
                 ((= code abort-code) :abort)
