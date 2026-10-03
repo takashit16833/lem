@@ -270,5 +270,13 @@ Return two values: a Lem key or NIL and a status keyword."
       (setf *keyboard-mode-pushed-p* nil))))
 
 
-;; Load the user's init file first so it can override the editor variable.
-(add-hook *after-init-hook* 'enable)
+(defun sync-enabled-state ()
+  "Apply the current global KKP setting to the terminal session."
+  (if (variable-value
+       'lem-ncurses/config:enable-kitty-keyboard-protocol
+       :global)
+      (enable)
+      (disable)))
+
+;; User init may override the default setting.
+(add-hook *after-init-hook* 'sync-enabled-state)
