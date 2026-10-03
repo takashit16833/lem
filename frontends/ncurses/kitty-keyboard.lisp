@@ -251,15 +251,15 @@ Return two values: a Lem key or NIL and a status keyword."
 
 (defun enable ()
   "Push KKP flag 1 when the user enabled it for this ncurses session."
-  (setf *keyboard-mode-pushed-p* nil)
-  (when (and (variable-value
-              'lem-ncurses/config:enable-kitty-keyboard-protocol
-              :global)
-             (lem-ncurses/term:raw-terminal-output-available-p))
-    (setf *keyboard-mode-pushed-p* t)
-    (lem-ncurses/term:write-terminal-sequence
-     +push-disambiguate-sequence+)
-    t))
+  (unless *keyboard-mode-pushed-p*
+    (when (and (variable-value
+                'lem-ncurses/config:enable-kitty-keyboard-protocol
+                :global)
+               (lem-ncurses/term:raw-terminal-output-available-p))
+      (setf *keyboard-mode-pushed-p* t)
+      (lem-ncurses/term:write-terminal-sequence
+       +push-disambiguate-sequence+)
+      t)))
 
 (defun disable ()
   "Pop the keyboard mode pushed by ENABLE, exactly once."
@@ -268,3 +268,7 @@ Return two values: a Lem key or NIL and a status keyword."
          (lem-ncurses/term:write-terminal-sequence
           +pop-keyboard-mode-sequence+)
       (setf *keyboard-mode-pushed-p* nil))))
+
+
+;; Load the user's init file first so it can override the editor variable.
+(add-hook *after-init-hook* 'enable)
