@@ -14,7 +14,9 @@
            :disable-mouse
            :update-cursor-shape
            :get-display-width
-           :get-display-height))
+           :get-display-height
+           :raw-terminal-output-available-p
+           :write-terminal-sequence))
 (in-package :lem-ncurses/term)
 
 (cffi:defcvar ("COLOR_PAIRS" *COLOR-PAIRS* :library charms/ll::libcurses) :int)
@@ -472,6 +474,29 @@
 
 (defun term-set-tty (tty-name)
   (setf *tty-name* tty-name))
+
+(defun raw-terminal-output-available-p ()
+  "Return true when raw terminal sequences can be written safely.
+
+The initial implementation intentionally supports only the normal INITSCR
+path. TERM-SET-TTY uses a separate C FILE* and needs independent lifecycle
+work before it can safely share this writer."
+  #-win32
+  (and (null *tty-name*)
+       (streamp *terminal-io*))
+  #+win32
+  nil)
+
+(defun write-terminal-sequence (string)
+  "Write STRING to the terminal used by the normal ncurses frontend.
+
+Return true when STRING was written. Custom TERM-SET-TTY sessions and
+Windows/PDCurses are intentionally unsupported for the first KKP
+implementation."
+  (when (raw-terminal-output-available-p)
+    (write-string string *terminal-io*)
+    (finish-output *terminal-io*)
+    t))
 
 (defun term-finalize ()
   (when *term-io*
