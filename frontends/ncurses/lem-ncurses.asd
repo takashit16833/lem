@@ -11,6 +11,7 @@
                (:file "clipboard")
                (:file "style")
                (:file "key")
+               (:file "kitty-keyboard")
                (:file "attribute")
                (:file "drawing-object")
                (:file "view")
