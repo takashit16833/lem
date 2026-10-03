@@ -253,7 +253,8 @@ Return two values: a Lem key or NIL and a status keyword."
   "Push KKP flag 1 when the user enabled it for this ncurses session."
   (setf *keyboard-mode-pushed-p* nil)
   (when (and (variable-value
-              'lem-ncurses/config:enable-kitty-keyboard-protocol)
+              'lem-ncurses/config:enable-kitty-keyboard-protocol
+              :global)
              (lem-ncurses/term:raw-terminal-output-available-p))
     (setf *keyboard-mode-pushed-p* t)
     (lem-ncurses/term:write-terminal-sequence
