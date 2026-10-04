@@ -50,7 +50,7 @@
     ((<= #xf0 c #xf4) 4)
     (t 1)))
 
-(defun kkp-ncurses-key (code &optional (name (keycode-name code)))
+(defun kkp-ncurses-key (code &optional name)
   "Recover a KKP key from an ncurses-generated key CODE.
 
 When keypad mode recognizes a modified functional-key sequence, wgetch
@@ -60,7 +60,8 @@ modifiers before falling back to Lem's historical integer table."
   (when (and (> code #xff)
              (lem-ncurses/kitty-keyboard:enabled-p))
     (multiple-value-bind (key status)
-        (lem-ncurses/kitty-keyboard:parse-ncurses-key-name name)
+        (lem-ncurses/kitty-keyboard:parse-ncurses-key-name
+         (or name (keycode-name code)))
       (when (eq status :key)
         key))))
 
