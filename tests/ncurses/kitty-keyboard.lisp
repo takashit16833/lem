@@ -71,6 +71,42 @@
     (ok (eq status :key))
     (ok (key-matches-p key :shift t :sym "Tab"))))
 
+(deftest parse-ncurses-extended-key-names
+  ;; ncurses can consume KKP legacy functional-key sequences before the
+  ;; CSI collector sees them. Recover the original modifier field from
+  ;; the extended terminfo key name returned by keyname().
+  (multiple-value-bind (key status)
+      (lem-ncurses/kitty-keyboard:parse-ncurses-key-name "kLFT4")
+    (ok (eq status :key))
+    (ok (key-matches-p key :meta t :shift t :sym "Left")))
+  (multiple-value-bind (key status)
+      (lem-ncurses/kitty-keyboard:parse-ncurses-key-name "kRIT4")
+    (ok (eq status :key))
+    (ok (key-matches-p key :meta t :shift t :sym "Right")))
+  (multiple-value-bind (key status)
+      (lem-ncurses/kitty-keyboard:parse-ncurses-key-name "kLFT5")
+    (ok (eq status :key))
+    (ok (key-matches-p key :ctrl t :sym "Left")))
+  (multiple-value-bind (key status)
+      (lem-ncurses/kitty-keyboard:parse-ncurses-key-name "kUP9")
+    (ok (eq status :key))
+    (ok (key-matches-p key :super t :sym "Up")))
+  (multiple-value-bind (key status)
+      (lem-ncurses/kitty-keyboard:parse-ncurses-key-name "KEY_LEFT")
+    (ng key)
+    (ok (eq status :unsupported))))
+
+(deftest ncurses-generated-code-prefers-kkp-key-name
+  ;; 545 is historically hard-coded as C-Left in Lem.  If ncurses assigns
+  ;; the same integer to kLFT4, KKP must recover M-Shift-Left from keyname
+  ;; before the historical integer table is consulted.
+  (let ((lem-ncurses/kitty-keyboard::*keyboard-mode-pushed-p* t))
+    (let ((key (lem-ncurses/input::kkp-ncurses-key 545 "kLFT4")))
+      (ok (key-matches-p key :meta t :shift t :sym "Left"))))
+  ;; KKP disabled keeps the existing ncurses path unchanged.
+  (let ((lem-ncurses/kitty-keyboard::*keyboard-mode-pushed-p* nil))
+    (ng (lem-ncurses/input::kkp-ncurses-key 545 "kLFT4"))))
+
 (deftest unicode-does-not-use-ncurses-keycodes
   (multiple-value-bind (key status) (parse-key "259;9u")
     (ok (eq status :key))

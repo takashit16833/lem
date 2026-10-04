@@ -50,20 +50,35 @@
     ((<= #xf0 c #xf4) 4)
     (t 1)))
 
+(defun kkp-ncurses-key (code &optional (name (keycode-name code)))
+  "Recover a KKP key from an ncurses-generated key CODE.
+
+When keypad mode recognizes a modified functional-key sequence, wgetch
+returns a generated integer instead of the original CSI bytes.  While KKP
+is active, use ncurses's symbolic key NAME to recover the key and its
+modifiers before falling back to Lem's historical integer table."
+  (when (and (> code #xff)
+             (lem-ncurses/kitty-keyboard:enabled-p))
+    (multiple-value-bind (key status)
+        (lem-ncurses/kitty-keyboard:parse-ncurses-key-name name)
+      (when (eq status :key)
+        key))))
+
 (defun get-key (code)
-  (let* ((char (let ((nbytes (utf8-bytes code)))
-                 (if (= nbytes 1)
-                     (code-char code)
-                     (let ((vec (make-array nbytes :element-type '(unsigned-byte 8))))
-                       (setf (aref vec 0) code)
-                       (with-getch-input-timeout (100)
-                         (loop :for i :from 1 :below nbytes
-                               :do (setf (aref vec i) (getch))))
-                       (handler-case (schar (babel:octets-to-string vec) 0)
-                         (babel-encodings:invalid-utf8-continuation-byte ()
-                           (code-char code)))))))
-         (key (char-to-key char)))
-    key))
+  (or (kkp-ncurses-key code)
+      (let* ((char (let ((nbytes (utf8-bytes code)))
+                     (if (= nbytes 1)
+                         (code-char code)
+                         (let ((vec (make-array nbytes :element-type '(unsigned-byte 8))))
+                           (setf (aref vec 0) code)
+                           (with-getch-input-timeout (100)
+                             (loop :for i :from 1 :below nbytes
+                                   :do (setf (aref vec i) (getch))))
+                           (handler-case (schar (babel:octets-to-string vec) 0)
+                             (babel-encodings:invalid-utf8-continuation-byte ()
+                               (code-char code)))))))
+             (key (char-to-key char)))
+        key)))
 
 (defun csi-final-byte-p (code)
   (and (integerp code)

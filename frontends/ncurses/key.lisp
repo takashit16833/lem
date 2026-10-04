@@ -2,6 +2,7 @@
   (:use :cl
         :lem)
   (:export :get-code
+           :keycode-name
            :char-to-key
            :get-key-from-name))
 (in-package :lem-ncurses/key)
@@ -17,6 +18,12 @@
   (let ((code (gethash name *keyname-table*)))
     (assert code)
     code))
+
+(defun keycode-name (code)
+  "Return ncurses's symbolic key name for CODE, or NIL."
+  (let ((pointer (charms/ll:keyname code)))
+    (unless (cffi:null-pointer-p pointer)
+      (cffi:foreign-string-to-lisp pointer))))
 
 (defun char-to-key (char)
   (or (gethash (char-code char) *keycode-table*)
