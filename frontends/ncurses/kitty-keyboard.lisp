@@ -2,6 +2,7 @@
   (:use :cl
         :lem)
   (:export :parse-csi-sequence
+           :parse-ncurses-key-name
            :enable
            :disable
            :enabled-p))
@@ -111,6 +112,17 @@
                 (#\Q . "F2")
                 (#\S . "F4")))))
 
+(defparameter +ncurses-extended-key-syms+
+  '(("kDC" . "Delete")
+    ("kDN" . "Down")
+    ("kEND" . "End")
+    ("kHOM" . "Home")
+    ("kLFT" . "Left")
+    ("kNXT" . "PageDown")
+    ("kPRV" . "PageUp")
+    ("kRIT" . "Right")
+    ("kUP" . "Up")))
+
 (defun modifier-args (encoded)
   (unless (and (integerp encoded) (plusp encoded))
     (return-from modifier-args (values nil :unsupported)))
@@ -154,6 +166,33 @@
     (values (apply #'make-key
                    (append args (list :sym sym)))
             :key)))
+
+(defun parse-ncurses-key-name (name)
+  "Parse ncurses extended key capability NAME while KKP is active.
+
+ncurses may consume a KKP legacy functional-key sequence before Lem sees
+its bytes.  For example, ESC [ 1 ; 4 D can be returned by wgetch as a
+generated key code whose keyname is kLFT4.  The numeric suffix is the
+modifier field from the original escape sequence, so decode it with the
+KKP modifier rules rather than relying on ncurses's generated integer."
+  (unless (stringp name)
+    (return-from parse-ncurses-key-name
+      (values nil :unsupported)))
+  (dolist (entry +ncurses-extended-key-syms+
+                 (values nil :unsupported))
+    (let* ((prefix (car entry))
+           (prefix-length (length prefix)))
+      (when (and (> (length name) prefix-length)
+                 (string= prefix
+                          (subseq name 0 prefix-length)))
+        (let ((modifier
+                (decimal-integer
+                 (subseq name prefix-length))))
+          (when modifier
+            (return
+              (make-key-with-modifiers
+               (cdr entry)
+               modifier))))))))
 
 (defun codepoint-sym (code)
   (or (functional-u-sym code)
