@@ -10,4 +10,4 @@
 
 
 ;; Kitty Keyboard Protocol
-(define-editor-variable enable-kitty-keyboard-protocol t)
+(define-editor-variable enable-kitty-keyboard-protocol nil)
